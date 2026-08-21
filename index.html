@@ -72,6 +72,14 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .track .t-any{background:var(--gold)}
 .barnums{display:flex;justify-content:space-between;margin-top:5px;font-size:12.5px;color:var(--muted)}
 .barnums b{color:var(--ink);font-weight:700}
+.syncline{display:flex;align-items:center;gap:6px;margin:-2px 0 6px;font-size:11px;color:var(--faint);font-weight:600}
+.syncline i{width:7px;height:7px;border-radius:99px;background:var(--line-2);flex:0 0 auto}
+.syncline.ok i{background:var(--good)}
+.syncline.ok span{color:var(--good)}
+.syncline.wait i{background:var(--mid);animation:lat 1.1s ease-in-out infinite}
+.syncline.err i{background:var(--bad)}
+.syncline.err span{color:var(--bad)}
+@keyframes lat{0%,100%{opacity:1}50%{opacity:.25}}
 
 /* ---------- selector de modo ---------- */
 .modes{display:flex;flex-wrap:wrap;gap:7px;padding:0 16px 11px}
@@ -233,6 +241,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
     </div>
     <div class="bar">
       <div class="barlabel" id="barlabel">Avance</div>
+      <div class="syncline" id="syncline"><i></i><span>Solo este teléfono</span></div>
       <div class="track"><i class="t-any" id="tkAny" style="width:0"></i></div>
       <div class="barnums"><span id="bnLeft">&nbsp;</span><span id="bnRight">&nbsp;</span></div>
     </div>
@@ -279,10 +288,114 @@ let S = load();
 function load(){
   let d = null;
   try{ d = JSON.parse(localStorage.getItem(KEY) || "null"); }catch(e){}
-  const base = {trm:3053.48, flete:0, tiendas:["Tienda 1","Tienda 2","Tienda 3","Tienda 4"], d:{}};
-  return Object.assign(base, d || {});
+  const base = {trm:3053.48, flete:0, tiendas:["Tienda 1","Tienda 2","Tienda 3","Tienda 4"], d:{}, pend:[]};
+  const s = Object.assign(base, d || {});
+  if(!Array.isArray(s.pend)) s.pend = [];
+  return s;
 }
 function save(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} }
+
+/* ================= SINCRONIZACIÓN CON LA HOJA =================
+   Si el link trae #sync=<url del Apps Script>, la app manda cada precio
+   a la hoja de Google y se trae lo que anotaron los demás. Sin esa url
+   funciona igual pero guardando solo en este teléfono.                */
+const SKEY = "caiena_sync_url";
+let SYNC = "";
+(function(){
+  const m = (location.hash + "&" + location.search).match(/[#&?]sync=([^&#]+)/);
+  if(m){
+    SYNC = decodeURIComponent(m[1]);
+    try{ localStorage.setItem(SKEY, SYNC); }catch(e){}
+    history.replaceState(null, "", location.pathname);
+  } else {
+    try{ SYNC = localStorage.getItem(SKEY) || ""; }catch(e){}
+  }
+})();
+
+let jid = 0;
+function jsonp(params, ms){
+  return new Promise((ok, mal) => {
+    if(!SYNC){ mal(new Error("sin sync")); return; }
+    const cb = "__cb" + (++jid);
+    const s = document.createElement("script");
+    let listo = false;
+    const t = setTimeout(() => { fin(); mal(new Error("tardó demasiado")); }, ms || 15000);
+    function fin(){
+      if(listo) return; listo = true;
+      clearTimeout(t); try{ delete window[cb]; }catch(e){ window[cb] = undefined; }
+      if(s.parentNode) s.remove();
+    }
+    window[cb] = r => { fin(); ok(r); };
+    s.onerror = () => { fin(); mal(new Error("no hay señal")); };
+    const q = Object.keys(params).map(k => k + "=" + encodeURIComponent(params[k])).join("&");
+    s.src = SYNC + (SYNC.indexOf("?") >= 0 ? "&" : "?") + "cb=" + cb + "&" + q;
+    document.head.appendChild(s);
+  });
+}
+
+let estadoSync = SYNC ? "wait" : "off";
+function pintaSync(){
+  const e = document.getElementById("syncline");
+  const txt = {off:"Solo este teléfono", wait:"Sincronizando…", ok:"Al día con el libro", err:"Sin señal · se guarda aquí"};
+  const p = S.pend.length;
+  e.className = "syncline " + (estadoSync === "off" ? "" : estadoSync);
+  e.querySelector("span").textContent = txt[estadoSync] + (p ? " · " + p + " por mandar" : "");
+}
+
+/* el servidor manda la verdad; lo que aún no he podido mandar se respeta */
+function fusiona(r){
+  if(!r || !r.ok) return;
+  S.d = r.d || {};
+  S.pend.forEach(x => {
+    const o = S.d[x.i] || (S.d[x.i] = {});
+    if(x.val === null) delete o[x.f]; else o[x.f] = x.val;
+    if(!Object.keys(o).length) delete S.d[x.i];
+  });
+  if(Array.isArray(r.tiendas) && r.tiendas.length === 4) S.tiendas = r.tiendas.map((t,k) => String(t || ("Tienda "+(k+1))));
+  if(r.trm > 0) S.trm = r.trm;
+  if(typeof r.flete === "number") S.flete = r.flete;
+  save();
+}
+
+let empujando = false;
+async function empuja(){
+  if(!SYNC || empujando) return;
+  empujando = true;
+  try{
+    while(S.pend.length){
+      const x = S.pend[0];
+      const r = await jsonp({op:"set", i:x.i, f:x.f, val:(x.val === null ? "" : x.val), who:x.who || ""});
+      if(!r || !r.ok) throw new Error(r && r.error || "la hoja no aceptó el dato");
+      S.pend.shift(); save();
+      fusiona(r);
+    }
+    estadoSync = "ok";
+  }catch(e){
+    estadoSync = "err";
+  }finally{
+    empujando = false;
+    save(); pintaSync(); pintaTodo();
+  }
+}
+
+async function traer(){
+  if(!SYNC || empujando) return;
+  if(estadoSync !== "ok") { estadoSync = "wait"; pintaSync(); }
+  try{
+    const r = await jsonp({op:"get"});
+    if(!r || !r.ok) throw new Error("respuesta rara");
+    fusiona(r); estadoSync = "ok";
+  }catch(e){ estadoSync = "err"; }
+  pintaSync(); pintaTodo();
+}
+
+function arrancaSync(){
+  if(!SYNC){ pintaSync(); return; }
+  traer().then(empuja);
+  setInterval(() => { if(!document.hidden) traer().then(empuja); }, 25000);
+  document.addEventListener("visibilitychange", () => { if(!document.hidden) traer().then(empuja); });
+  window.addEventListener("online", () => traer().then(empuja));
+}
 
 let modo = 0;            // 0..3 mayoristas, 4 = vitrina
 let filtro = "todos";
@@ -509,7 +622,12 @@ function guarda(i, n){
   const k = modo === 4 ? "v" : "m" + modo;
   if(n === null) delete r[k]; else r[k] = n;
   if(!Object.keys(r).length) delete S.d[i];
+  if(SYNC){
+    S.pend = S.pend.filter(x => !(x.i === i && x.f === k));
+    S.pend.push({i:i, f:k, val:n, who:S.quien || ""});
+  }
   save();
+  if(SYNC){ pintaSync(); empuja(); }
 }
 
 /* ---------------- resumen ---------------- */
@@ -620,10 +738,38 @@ function pintaEnviar(){
         '<button class="btn" id="bVit">Vitrina → R6</button>' +
       '</div>' +
     '</div>' +
+    '<div class="box"><h3>Sincronizar entre teléfonos</h3>' +
+      (SYNC
+        ? '<p class="note">Conectado al libro. Lo que anote cualquiera aparece en todos los teléfonos.<br>' +
+          'Estado: <b>' + ({ok:"al día", wait:"sincronizando", err:"sin señal, se guarda aquí y se manda solo"}[estadoSync] || "—") + '</b>' +
+          (S.pend.length ? ' · <b>' + S.pend.length + '</b> por mandar' : "") + '</p>' +
+          '<div class="sh-acts" style="padding:13px 0 0">' +
+            '<button class="btn" id="bLink">Copiar link para otro teléfono</button>' +
+            '<button class="btn" id="bAhora">Sincronizar ahora</button></div>'
+        : '<p class="note">Ahora mismo los precios se guardan <b>solo en este teléfono</b>. Para que se compartan, Norman pega aquí la dirección del conector de la hoja (la que termina en <b>/exec</b>).</p>' +
+          '<div class="field" style="margin-top:11px"><input id="fSync" placeholder="https://script.google.com/macros/s/.../exec"></div>' +
+          '<div class="sh-acts" style="padding:2px 0 0"><button class="btn gold" id="bSync">Conectar</button></div>') +
+    '</div>' +
     '<div class="box"><h3>Empezar de cero</h3>' +
       '<p class="note">Borra todos los precios anotados en este teléfono. El catálogo se queda.</p>' +
       '<div class="sh-acts" style="padding:13px 0 0"><button class="btn" id="bReset">Borrar todo lo anotado</button></div>' +
     '</div>';
+
+  if(SYNC){
+    document.getElementById("bAhora").onclick = () => traer().then(empuja);
+    document.getElementById("bLink").onclick = () =>
+      copia(location.origin + location.pathname + "#sync=" + encodeURIComponent(SYNC),
+            "Link copiado · mándaselo y ya queda conectado");
+  } else {
+    document.getElementById("bSync").onclick = () => {
+      const u = document.getElementById("fSync").value.trim();
+      if(!/^https:\/\/script\.google\.com\/.+\/exec$/.test(u)){
+        toast("Esa dirección no es la del conector (debe terminar en /exec)"); return;
+      }
+      SYNC = u; try{ localStorage.setItem(SKEY, u); }catch(e){}
+      estadoSync = "wait"; pintaSync(); arrancaSync(); toast("Conectando con el libro…");
+    };
+  }
 
   document.getElementById("bWA").onclick = () => {
     if(!anotados){ toast("Todavía no has anotado nada"); return; }
@@ -632,8 +778,9 @@ function pintaEnviar(){
   document.getElementById("bMay").onclick = () => copia(tsv("may"), "Copiado · pégalo en H6");
   document.getElementById("bVit").onclick = () => copia(tsv("vit"), "Copiado · pégalo en R6");
   document.getElementById("bReset").onclick = () => {
-    if(!confirm("¿Borrar todos los precios anotados?")) return;
-    S.d = {}; save(); pintaTodo(); toast("Listo, quedaste en cero");
+    if(!confirm("¿Borrar todos los precios anotados en este teléfono?")) return;
+    S.d = {}; S.pend = []; save(); pintaTodo(); pintaSync();
+    toast(SYNC ? "Borrado aquí · al sincronizar vuelve lo del libro" : "Listo, quedaste en cero");
   };
 }
 
@@ -646,6 +793,8 @@ function ajustes(){
       '<div class="meta">cámbialos cuando haga falta</div></div>' +
       '<button class="x" id="xBtn" aria-label="Cerrar">&#10005;</button></div>' +
     '<div class="ask">' +
+      '<div class="field"><label>¿Quién está anotando? (queda en la bitácora)</label>' +
+        '<input id="fQuien" value="' + esc(S.quien || "") + '" maxlength="24" placeholder="tu nombre"></div>' +
       S.tiendas.map((t,k) => '<div class="field"><label>Tienda ' + (k+1) + '</label>' +
         '<input id="tn' + k + '" value="' + esc(t) + '" maxlength="22"></div>').join("") +
       '<div class="field"><label>Tasa: cuántos pesos colombianos por 1 dólar</label>' +
@@ -657,6 +806,7 @@ function ajustes(){
     '<div class="sh-acts"><button class="btn primary" id="bOk">Guardar</button></div>';
   document.getElementById("xBtn").onclick = cerrar;
   document.getElementById("bOk").onclick = () => {
+    S.quien = document.getElementById("fQuien").value.trim();
     S.tiendas = S.tiendas.map((_,k) =>
       (document.getElementById("tn"+k).value.trim() || ("Tienda " + (k+1))));
     const t = parseFloat(document.getElementById("fTrm").value);
@@ -664,6 +814,8 @@ function ajustes(){
     if(t > 0) S.trm = t;
     if(f >= 0) S.flete = f/100;
     save(); cerrar(); pintaTodo(); toast("Ajustes guardados");
+    if(SYNC) jsonp({op:"names", t0:S.tiendas[0], t1:S.tiendas[1], t2:S.tiendas[2], t3:S.tiendas[3]})
+      .then(r => { fusiona(r); pintaTodo(); }).catch(() => {});
   };
   document.getElementById("scrim").classList.add("on");
   document.getElementById("sheet").classList.add("on");
@@ -692,5 +844,5 @@ document.querySelectorAll(".nav button").forEach(b => {
   };
 });
 document.addEventListener("keydown", e => { if(e.key === "Escape") cerrar(); });
-pintaChips(); pintaTodo();
+pintaChips(); pintaTodo(); pintaSync(); arrancaSync();
 </script>
