@@ -288,6 +288,15 @@ a.tel:active{opacity:.7}
 <script>
 const PROD = __DATOS__;
 const KEY = "caiena_sondeo_v2";
+/* Las únicas referencias que NO se consiguen en Maracaibo, comparadas contra
+   "Maxi topos en acero" (acero 316L) y "Zed & Two" (rodinado S925), 20-ago-2026.
+   Todas son de color o esmalte: negras, flecos OASIS, esmaltadas OLIVIA/PASION
+   y DESERTICA. Ahí Caiena no tiene con quién competir; en el resto el local
+   sale más barato. Los sets SECUENCIA salieron de esta lista: Zed & Two vende
+   set x3 pares a US$ 3,50 al mayor. */
+const SIN_RIVAL = [21,22,75,88,89,90,91,92,93,94,95,96,97,99,101,102];
+const esSinRival = i => SIN_RIVAL.indexOf(i) >= 0;
+
 const TIERS = [
   {w:"EXCELENTE", min:.65, c:"good"},
   {w:"BUENO",     min:.50, c:"good"},
@@ -481,7 +490,8 @@ function pintaModos(){
 }
 
 /* ---------------- filtros ---------------- */
-const FILTROS = [["todos","Todos"],["falta","Me falta"],["listo","Ya anoté"],["negocio","★ Buen negocio"]];
+const FILTROS = [["todos","Todos"],["sinrival","◆ Sin rival local"],["falta","Me falta"],
+                 ["listo","Ya anoté"],["negocio","★ Buen negocio"]];
 function pintaChips(){
   const c = document.getElementById("chips"); c.innerHTML = "";
   FILTROS.forEach(([k,lb]) => {
@@ -507,6 +517,7 @@ function pintaLista(){
     if(filtro === "falta"   && (modo===4 ? typeof vitrina(i)==="number" : typeof rec(i)["m"+modo]==="number")) return;
     if(filtro === "listo"   && st === "falta") return;
     if(filtro === "negocio" && st !== "negocio") return;
+    if(filtro === "sinrival" && !esSinRival(i)) return;
     n++;
     const v = valorModo(i), ver = veredicto(i);
     const b = document.createElement("button");
@@ -517,6 +528,7 @@ function pintaLista(){
         '<div class="nm">' + esc(p.n) + '</div>' +
         '<div class="cost">te cuesta <b class="num">' + usd(puesto(i)) + '</b></div>' +
         (ver ? '<span class="badge b-' + ver.t.c + '">' + ver.t.w + '</span>'
+             : esSinRival(i) ? '<span class="badge b-oro">&#9670; sin rival local</span>'
              : '<span class="cost" style="font-size:11.5px;opacity:.7">pág ' + p.p + ' · ' + cop(p.c) + ' COP</span>') +
       '</div>' +
       '<div class="slot' + (typeof v === "number" ? " has" : "") + '">' +
