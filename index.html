@@ -207,6 +207,18 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .field label{font-size:12px;color:var(--muted);font-weight:600}
 .field input{background:var(--ground);border:1px solid var(--line-2);border-radius:10px;padding:10px 12px;
              font:inherit;color:var(--ink);width:100%}
+.par{display:flex;gap:7px}
+.par input:first-child{flex:1 1 58%}
+.par input:last-child{flex:1 1 42%}
+.tienda{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
+.tienda:last-of-type{border-bottom:0}
+.tienda .ti{flex:1;min-width:0}
+.tienda .tn{font-weight:700;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tienda .tm{font-size:11.5px;color:var(--faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tienda .tp{font-family:Archivo,sans-serif;font-weight:800;font-size:15px;flex:0 0 auto}
+a.tel{flex:0 0 auto;text-decoration:none;font-size:12px;font-weight:700;padding:6px 12px;border-radius:99px;
+      background:var(--good-bg);color:var(--good);border:1px solid transparent}
+a.tel:active{opacity:.7}
 .note{font-size:12.5px;color:var(--muted);line-height:1.5}
 .note b{color:var(--ink)}
 .top5{display:flex;flex-direction:column;gap:8px}
@@ -288,9 +300,11 @@ let S = load();
 function load(){
   let d = null;
   try{ d = JSON.parse(localStorage.getItem(KEY) || "null"); }catch(e){}
-  const base = {trm:3053.48, flete:0, tiendas:["Tienda 1","Tienda 2","Tienda 3","Tienda 4"], d:{}, pend:[]};
+  const base = {trm:3053.48, flete:0, tiendas:["Tienda 1","Tienda 2","Tienda 3","Tienda 4"],
+                tels:["","","",""], d:{}, pend:[]};
   const s = Object.assign(base, d || {});
   if(!Array.isArray(s.pend)) s.pend = [];
+  if(!Array.isArray(s.tels) || s.tels.length !== 4) s.tels = ["","","",""];
   return s;
 }
 function save(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} }
@@ -646,10 +660,12 @@ function pintaResumen(){
       const ps = [0,1,2,3].map(j => rec(i)["m"+j]).filter(v => typeof v === "number");
       if(ps.length > 1 && rec(i)["m"+k] === Math.min(...ps)) gana++;
     });
-    return {t, n:vs.length, prom: vs.length ? vs.reduce((a,b)=>a+b,0)/vs.length : null, gana};
+    return {t, tel:(S.tels[k] || "").trim(), n:vs.length,
+            prom: vs.length ? vs.reduce((a,b)=>a+b,0)/vs.length : null, gana};
   });
 
   const mejores = conVit.map(i => ({i, v:veredicto(i)}))
+    .filter(m => m.v.gana > 0)
     .sort((a,b) => b.v.gana - a.v.gana).slice(0,5);
 
   const tierColor = {good:"var(--good)", mid:"var(--mid)", bad:"var(--bad)"};
@@ -680,12 +696,23 @@ function pintaResumen(){
       '<span class="g">' + usd(m.v.gana) + '</span></div>').join("") + '</div></div>' : "") +
 
     '<div class="box"><h3>Las tiendas al mayor</h3>' +
-      porTienda.map(p => '<div class="kv"><span>' + esc(p.t) +
-        (p.n ? ' · ' + p.n + ' precios' : "") + '</span><b class="num">' +
-        (p.prom !== null ? usd(p.prom) : "—") + '</b></div>').join("") +
-      '<p class="note" style="margin-top:9px">Más barata en <b>' +
-        (porTienda.reduce((a,b)=>b.gana>a.gana?b:a).gana ? esc(porTienda.reduce((a,b)=>b.gana>a.gana?b:a).t) +
-        '</b> (' + porTienda.reduce((a,b)=>b.gana>a.gana?b:a).gana + ' productos)' : 'ninguna todavía</b>') + '</p>' +
+      porTienda.map(p =>
+        '<div class="tienda">' +
+          '<div class="ti">' +
+            '<div class="tn">' + esc(p.t) + '</div>' +
+            '<div class="tm">' + (p.n ? p.n + (p.n === 1 ? ' precio' : ' precios') : "sin precios todavía") +
+              (p.tel ? ' · ' + esc(p.tel) : "") + '</div>' +
+          '</div>' +
+          (p.tel ? '<a class="tel" href="tel:' + esc(p.tel.replace(/[^\d+]/g, "")) + '">Llamar</a>' : "") +
+          '<b class="num tp">' + (p.prom !== null ? usd(p.prom) : "—") + '</b>' +
+        '</div>').join("") +
+      (function(){
+        const g = porTienda.reduce((a,b) => b.gana > a.gana ? b : a);
+        return '<p class="note" style="margin-top:9px">' + (g.gana
+          ? 'Más barata en <b>' + esc(g.t) + '</b> · gana en ' + g.gana +
+            (g.gana === 1 ? ' producto' : ' productos')
+          : 'Todavía no hay con qué comparar: hace falta el mismo producto en dos tiendas.') + '</p>';
+      })() +
     '</div>';
 }
 
@@ -796,7 +823,11 @@ function ajustes(){
       '<div class="field"><label>¿Quién está anotando? (queda en la bitácora)</label>' +
         '<input id="fQuien" value="' + esc(S.quien || "") + '" maxlength="24" placeholder="tu nombre"></div>' +
       S.tiendas.map((t,k) => '<div class="field"><label>Tienda ' + (k+1) + '</label>' +
-        '<input id="tn' + k + '" value="' + esc(t) + '" maxlength="22"></div>').join("") +
+        '<div class="par">' +
+          '<input id="tn' + k + '" value="' + esc(t) + '" maxlength="22" placeholder="nombre">' +
+          '<input id="tl' + k + '" value="' + esc(S.tels[k] || "") + '" maxlength="24" ' +
+            'inputmode="tel" placeholder="teléfono">' +
+        '</div></div>').join("") +
       '<div class="field"><label>Tasa: cuántos pesos colombianos por 1 dólar</label>' +
         '<input id="fTrm" inputmode="decimal" value="' + S.trm + '"></div>' +
       '<div class="field"><label>Flete + aduana (%) que le sumas al costo</label>' +
@@ -809,6 +840,7 @@ function ajustes(){
     S.quien = document.getElementById("fQuien").value.trim();
     S.tiendas = S.tiendas.map((_,k) =>
       (document.getElementById("tn"+k).value.trim() || ("Tienda " + (k+1))));
+    S.tels = S.tels.map((_,k) => document.getElementById("tl"+k).value.trim());
     const t = parseFloat(document.getElementById("fTrm").value);
     const f = parseFloat(document.getElementById("fFle").value);
     if(t > 0) S.trm = t;

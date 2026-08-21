@@ -102,6 +102,38 @@ function leer(sh) {
   };
 }
 
+/**
+ * Deja bonitas las columnas TELÉFONO / DÓNDE QUEDA / NOTAS de la hoja RESUMEN
+ * (las agregué a mano y quedaron sin color). Se corre UNA vez, desde el editor:
+ * elige "formatoResumen" en el selector de funciones y dale a Ejecutar.
+ */
+function formatoResumen() {
+  var rs = SpreadsheetApp.openById(ID).getSheetByName('RESUMEN');
+  if (!rs) throw new Error('No encuentro la pestaña RESUMEN');
+
+  rs.getRange('A17:H17').merge()
+    .setBackground('#6B4F1D').setFontColor('#FFFFFF')
+    .setFontWeight('bold').setHorizontalAlignment('center');
+
+  rs.getRange('F18:H18')
+    .setBackground('#C9A227').setFontColor('#000000')
+    .setFontWeight('bold').setFontSize(9)
+    .setHorizontalAlignment('center').setVerticalAlignment('middle')
+    .setWrap(true);
+
+  rs.getRange('F19:H22')
+    .setBackground('#FFF9E7').setFontColor('#0000FF')
+    .setFontWeight('bold').setFontSize(10)
+    .setHorizontalAlignment('left')
+    .setNumberFormat('@');   // texto: no se come el 0 de "0414..."
+
+  rs.getRange('A18:H22').setBorder(true, true, true, true, true, true,
+    '#BFBFBF', SpreadsheetApp.BorderStyle.SOLID);
+
+  SpreadsheetApp.flush();
+  return 'Listo';
+}
+
 function anotarBitacora(ss, p, fila) {
   var b = ss.getSheetByName('BITACORA');
   if (!b) {
